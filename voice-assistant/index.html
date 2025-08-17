@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alka - Voice Assistant (Web Speech API)</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .container {
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 20px;
+        }
+
+        .status-container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 15px;
+            margin: 20px 0;
+        }
+
+        .mic-button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 20px 40px;
+            border-radius: 50px;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 20px 0;
+        }
+
+        .mic-button:hover {
+            background: #45a049;
+            transform: scale(1.05);
+        }
+
+        .mic-button.listening {
+            background: #f44336;
+            animation: pulse 1.5s infinite;
+        }
+
+        .mic-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .log {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            text-align: left;
+        }
+
+        .log p {
+            margin: 5px 0;
+            font-family: monospace;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        .control-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        .control-button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .control-button.off {
+            background: #f44336;
+        }
+
+        .control-button:hover {
+            transform: scale(1.05);
+        }
+
+        .command-list {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 10px 0;
+            font-size: 0.9em;
+        }
+
+        .error {
+            background: rgba(244, 67, 54, 0.2);
+            color: #ffcdd2;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+
+        .success {
+            background: rgba(76, 175, 80, 0.2);
+            color: #c8e6c9;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Alka Voice Assistant</h1>
+        
+        <div class="status-container">
+            <p>Voice commands to control your LED</p>
+            <p id="statusText">Initializing voice recognition...</p>
+        </div>
+
+        <div class="command-list">
+            <p><strong>Voice Commands:</strong></p>
+            <p>Say "Hey Buddy" followed by:</p>
+            <ul>
+                <li>"Turn on the light" → Turn ON</li>
+                <li>"Turn off the light" → Turn OFF</li>
+                <li>"Switch on the light" → Turn ON</li>
+                <li>"Switch off the light" → Turn OFF</li>
+            </ul>
+            <p><em>Make sure you're connected to "Lav_Guest" WiFi for internet access</em></p>
+        </div>
+
+        <div class="control-buttons">
+            <button onclick="controlESP('on')" class="control-button">
+                🔆 Turn ON
+            </button>
+            <button onclick="controlESP('off')" class="control-button off">
+                ⭕ Turn OFF
+            </button>
+        </div>
+
+        <button id="micButton" class="mic-button" disabled>
+            Start Listening
+        </button>
+
+        <div class="log" id="commandLog">
+            <p>Click "Start Listening" and say "Hey Buddy, turn on the light"</p>
+            <p>Make sure you're connected to "Lav_Guest" WiFi network</p>
+        </div>
+    </div>
+
+    <script>
+        const commandLog = document.getElementById('commandLog');
+        const micButton = document.getElementById('micButton');
+        const statusText = document.getElementById('statusText');
+        
+        let recognition;
+        let isListening = false;
+
+        // Check if Web Speech API is supported
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            // Initialize speech recognition
+            recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = function() {
+                addToLog('🎤 Voice recognition started');
+                statusText.textContent = 'Listening... Say "Hey Alka" followed by a command';
+                micButton.disabled = false;
+            };
+
+            recognition.onresult = function(event) {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript;
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+
+                // Process final transcript
+                if (finalTranscript) {
+                    processCommand(finalTranscript.toLowerCase());
+                }
+            };
+
+            recognition.onerror = function(event) {
+                addToLog(`❌ Error: ${event.error}`);
+                if (event.error === 'network') {
+                    addToLog('🌐 Network error - Make sure you have internet access');
+                }
+                stopListening();
+            };
+
+            recognition.onend = function() {
+                addToLog('🛑 Voice recognition stopped');
+                if (isListening) {
+                    // Restart if we're supposed to be listening
+                    setTimeout(() => {
+                        if (isListening) {
+                            recognition.start();
+                        }
+                    }, 1000);
+                }
+            };
+
+            // Enable mic button
+            micButton.disabled = false;
+            statusText.textContent = 'Voice recognition ready! Click "Start Listening"';
+        } else {
+            statusText.textContent = 'Speech recognition not supported in this browser';
+            addToLog('❌ Speech recognition not supported');
+        }
+
+        // Process voice command
+        function processCommand(command) {
+            addToLog(`🎤 Heard: "${command}"`);
+            
+            // Check for wake word
+            if (command.includes('hey buddy') || command.includes('hey alka') || command.includes('hey alpha')) {
+                addToLog('✅ Wake word detected!');
+                
+                // Check for ON commands
+                if (command.includes('turn on') || command.includes('switch on') || command.includes('lights on')) {
+                    addToLog('🔆 Turning ON the light...');
+                    controlESP('on');
+                }
+                // Check for OFF commands
+                else if (command.includes('turn off') || command.includes('switch off') || command.includes('lights off')) {
+                    addToLog('⭕ Turning OFF the light...');
+                    controlESP('off');
+                }
+                else {
+                    addToLog('❓ Command not recognized. Try "turn on the light" or "turn off the light"');
+                }
+            }
+        }
+
+        // Control ESP8266
+        async function controlESP(action) {
+            addToLog(`📡 Sending ${action} command to ESP8266...`);
+            
+            try {
+                // ESP8266 is now on guest network at 192.168.0.101
+                const espIPs = ['http://192.168.0.101'];
+                let success = false;
+                
+                for (const espIP of espIPs) {
+                    try {
+                        const response = await fetch(`${espIP}/${action}`);
+                        if (response.ok) {
+                            addToLog(`✅ Successfully turned ${action.toUpperCase()} the light via ${espIP}`);
+                            success = true;
+                            break;
+                        }
+                    } catch (error) {
+                        addToLog(`⚠️ Failed to connect to ${espIP}: ${error.message}`);
+                    }
+                }
+                
+                if (!success) {
+                    addToLog('❌ Could not connect to ESP8266. Make sure you\'re connected to the guest network.');
+                }
+            } catch (error) {
+                addToLog(`❌ Error: ${error.message}`);
+            }
+        }
+
+        // Start/Stop listening
+        function startListening() {
+            if (recognition) {
+                isListening = true;
+                micButton.textContent = 'Listening...';
+                micButton.classList.add('listening');
+                recognition.start();
+            }
+        }
+
+        function stopListening() {
+            isListening = false;
+            micButton.textContent = 'Start Listening';
+            micButton.classList.remove('listening');
+            if (recognition) {
+                recognition.stop();
+            }
+        }
+
+        micButton.addEventListener('click', () => {
+            if (!isListening) {
+                startListening();
+            } else {
+                stopListening();
+            }
+        });
+
+        function addToLog(message) {
+            const p = document.createElement('p');
+            p.textContent = `${new Date().toLocaleTimeString()} - ${message}`;
+            commandLog.insertBefore(p, commandLog.firstChild);
+            
+            // Keep only last 20 messages
+            while (commandLog.children.length > 20) {
+                commandLog.removeChild(commandLog.lastChild);
+            }
+        }
+
+        // Initial setup
+        addToLog('🚀 Voice assistant loaded');
+        addToLog('📡 Ready to control ESP8266 LED');
+    </script>
+</body>
+</html> 
